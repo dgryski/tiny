@@ -272,13 +272,13 @@ func (d *Device) clearFlags(register byte, mask byte) error {
 	return d.writeRegister(register, current&^mask)
 }
 
-func (d *Device) ReadUID(timeout time.Duration) (uid []byte, err error) {
-	uuid, err := d.selectCard(timeout)
+func (d *Device) ReadUID() (uid []byte, err error) {
+	uuid, err := d.selectCard()
 	return uuid, err
 }
 
 // selectCard selects the card after the IRQ event was received.
-func (d *Device) selectCard(timeout time.Duration) ([]byte, error) {
+func (d *Device) selectCard() ([]byte, error) {
 	if _, err := d.request(); err != nil {
 		return nil, err
 	}

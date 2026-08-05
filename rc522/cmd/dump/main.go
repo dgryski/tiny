@@ -58,7 +58,7 @@ func main() {
 	println("place tag")
 
 	for {
-		uuid, err := rfid.ReadUID(1 * time.Second)
+		uuid, err := rfid.ReadUID()
 		if err == nil {
 			var hx hd.Dumper
 			hx.Dump(uuid)
