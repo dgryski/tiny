@@ -450,6 +450,10 @@ func (d *Device) Authenticate(mode byte, block byte, key []byte, uid []byte) err
 	buf[0] = mode
 	buf[1] = block
 	copy(buf[2:], key)
+	if len(uid) < 4 {
+		// TODO(dgryski): create a distinct error here?
+		return ErrAuthFailed
+	}
 	copy(buf[8:], uid[:4])
 
 	if _, _, err := d.communicateWithPICC(pcdMFAuthent, buf, 0, 0); err != nil {
