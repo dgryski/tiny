@@ -455,7 +455,6 @@ func (d *Device) Authenticate(mode byte, block byte, key []byte, uid []byte) err
 	if _, _, err := d.communicateWithPICC(pcdMFAuthent, buf, 0, 0); err != nil {
 		return ErrAuthFailed
 	}
-	time.Sleep(25 * time.Millisecond)
 
 	status, err := d.readRegister(regStatus2)
 	if err != nil {
