@@ -501,7 +501,7 @@ func (d *Device) WriteBlock(block byte, data [16]byte) error {
 func (d *Device) HaltA() error {
 	buf := make([]byte, 4)
 	buf[0] = piccHALT
-	buf[1] = 0x70
+	buf[1] = 0x00
 
 	lsb, msb, err := d.calculateCRC(buf[:2])
 	if err != nil {
