@@ -58,30 +58,35 @@ func main() {
 	println("place tag")
 
 	for {
-		uuid, err := rfid.ReadUID()
-		if err == nil {
-			var hx hd.Dumper
-			hx.Dump(uuid)
-			hx.SetOffset(0)
-			for block := byte(0); block < 64; block++ {
-				err := rfid.Authenticate(rc522.AuthKeyA, block, DefaultKey[:], uuid)
-				if err != nil {
-					println("auth error:", err)
-					break
-				}
-				data, err := rfid.ReadBlock(block)
-				if err != nil {
-					println("error during read block:", err)
-					break
-				}
-				hx.Dump(data)
-			}
-			rfid.HaltA()
-			rfid.StopCrypto()
-		} else {
-			println("read uid error:", err)
-
+		ok, _ := rfid.Request()
+		if !ok {
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
-		time.Sleep(500 * time.Millisecond)
+		println("card detected")
+		uuid, err := rfid.ReadUID()
+		if err != nil {
+			println("error during read uid:", err)
+			continue
+		}
+
+		var hx hd.Dumper
+		hx.Dump(uuid)
+		hx.SetOffset(0)
+		for block := byte(0); block < 64; block++ {
+			err := rfid.Authenticate(rc522.AuthKeyA, block, DefaultKey[:], uuid)
+			if err != nil {
+				println("auth error:", err)
+				break
+			}
+			data, err := rfid.ReadBlock(block)
+			if err != nil {
+				println("error during read block:", err)
+				break
+			}
+			hx.Dump(data)
+		}
+		rfid.HaltA()
+		rfid.StopCrypto()
 	}
 }

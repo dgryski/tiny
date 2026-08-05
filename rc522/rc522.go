@@ -110,7 +110,15 @@ func (d *Device) SetAntennaGain(gain byte) error {
 	return nil
 }
 
-func (d *Device) request() (bool, error) {
+func (d *Device) Request() (bool, error) {
+	return d.request_or_wakeup(piccREQA)
+}
+
+func (d *Device) Wakeup() (bool, error) {
+	return d.request_or_wakeup(piccWUPA)
+}
+
+func (d *Device) request_or_wakeup(mode byte) (bool, error) {
 	if err := d.writeRegister(regTxMode, 0x00); err != nil {
 		return false, err
 	}
@@ -124,7 +132,7 @@ func (d *Device) request() (bool, error) {
 		return false, err
 	}
 
-	_, backBits, err := d.communicateWithPICC(pcdTransceive, []byte{piccREQA}, 0, 0)
+	_, backBits, err := d.communicateWithPICC(pcdTransceive, []byte{mode}, 0, 0)
 	if err != nil {
 		return false, err
 	}
@@ -279,9 +287,6 @@ func (d *Device) ReadUID() (uid []byte, err error) {
 
 // selectCard selects the card after the IRQ event was received.
 func (d *Device) selectCard() ([]byte, error) {
-	if _, err := d.request(); err != nil {
-		return nil, err
-	}
 	uuid, err := d.anticollision(piccSEL_CL1)
 
 	if err != nil {
