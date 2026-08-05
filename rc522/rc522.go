@@ -287,7 +287,7 @@ func (d *Device) selectCard(timeout time.Duration) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := d.selectTag(uuid); err != nil {
+	if _, err := d.selectTag(uuid, piccSEL_CL1); err != nil {
 		return nil, err
 	}
 
@@ -303,6 +303,10 @@ func (d *Device) selectCard(timeout time.Duration) ([]byte, error) {
 		// strip off 0x88 and final crc byte
 		uuid = uuid[1 : len(uuid)-1]
 		uuid = append(uuid, uuidEnd[:len(uuidEnd)-1]...)
+
+		if _, err := d.selectTag(uuid, piccSEL_CL2); err != nil {
+			return nil, err
+		}
 
 		return uuid, nil
 	}
@@ -341,10 +345,10 @@ func (d *Device) anticollision(cascadeLevel byte) ([]byte, error) {
 }
 
 // selectTag selects the FOB device by device UUID.
-func (d *Device) selectTag(serial []byte) (byte, error) {
+func (d *Device) selectTag(serial []byte, cl byte) (byte, error) {
 	var bptr int
 	buf := make([]byte, 7+2)
-	buf[0] = piccSEL_CL1
+	buf[0] = cl
 	buf[1] = 0x70
 	bptr += 2
 	copy(buf[bptr:], serial)
