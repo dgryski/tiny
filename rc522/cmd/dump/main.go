@@ -76,6 +76,7 @@ func main() {
 				}
 				hx.Dump(data)
 			}
+			rfid.HaltA()
 			rfid.StopCrypto()
 		} else {
 			println("read uid error:", err)
