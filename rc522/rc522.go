@@ -14,6 +14,7 @@ var (
 	ErrReadTimeout = errors.New("read failed: timeout")
 	ErrRead        = errors.New("read failed")
 	ErrNoDevice    = errors.New("no response from device")
+	ErrCRC         = errors.New("crc mismatch")
 )
 
 func (d *Device) Init() error {
@@ -360,7 +361,7 @@ func (d *Device) anticollision(cascadeLevel byte) ([]byte, error) {
 	return backData, nil
 }
 
-// selectTag selects the FOB device by device UUID.
+// selectTag selects the card by UID and returns its SAK.
 func (d *Device) selectTag(serial []byte, cl byte) (byte, error) {
 	var bptr int
 	buf := make([]byte, 7+2)
@@ -383,11 +384,18 @@ func (d *Device) selectTag(serial []byte, cl byte) (byte, error) {
 		return 0, err
 	}
 
-	var blocks byte
-	if len(backData) == 3 && lastBits == 0 {
-		blocks = backData[0]
+	// The SAK is one byte followed by a CRC_A.
+	if len(backData) != 3 || lastBits != 0 {
+		return 0, ErrRead
 	}
-	return blocks, nil
+	lsb, msb, err = d.calculateCRC(backData[:1])
+	if err != nil {
+		return 0, err
+	}
+	if backData[1] != lsb || backData[2] != msb {
+		return 0, ErrCRC
+	}
+	return backData[0], nil
 }
 
 // calculateCRC calculates the CRC of the data using the card chip.
