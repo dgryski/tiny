@@ -16,6 +16,7 @@ var (
 	ErrNoDevice    = errors.New("no response from device")
 	ErrCRC         = errors.New("crc mismatch")
 	ErrNAK         = errors.New("card replied with NAK")
+	ErrCollision   = errors.New("collision detected")
 )
 
 func (d *Device) Init() error {
@@ -170,6 +171,10 @@ func (d *Device) request_or_wakeup(mode byte) (bool, error) {
 	if errors.Is(err, ErrReadTimeout) {
 		return false, nil
 	}
+	// Several cards answered, so at least one is present.
+	if errors.Is(err, ErrCollision) {
+		return true, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -180,7 +185,8 @@ func (d *Device) request_or_wakeup(mode byte) (bool, error) {
 }
 
 // communicateWithPICC runs cmd and returns the received bytes and the number
-// of valid bits in the last byte, where 0 means all 8 bits are valid.
+// of valid bits in the last byte, where 0 means all 8 bits are valid. On
+// ErrCollision the received data is returned as well.
 func (d *Device) communicateWithPICC(cmd byte, data []byte, txLastBits byte, rxAlign byte) ([]byte, byte, error) {
 	var irqWait byte
 
@@ -282,6 +288,11 @@ func (d *Device) communicateWithPICC(cmd byte, data []byte, txLastBits byte, rxA
 			return nil, 0, err
 		}
 		lastBits = control & 0x07
+	}
+
+	// The received data is still returned so the caller can resolve it.
+	if errReg&0x08 != 0 {
+		return backData, lastBits, ErrCollision
 	}
 
 	return backData, lastBits, nil
