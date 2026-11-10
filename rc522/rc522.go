@@ -451,15 +451,16 @@ func (d *Device) calculateCRC(data []byte) (byte, byte, error) {
 }
 
 func (d *Device) Authenticate(mode byte, block byte, key []byte, uid []byte) error {
+	if len(key) != 6 || len(uid) < 4 {
+		// TODO(dgryski): create a distinct error here?
+		return ErrAuthFailed
+	}
 	buf := make([]byte, 12)
 	buf[0] = mode
 	buf[1] = block
 	copy(buf[2:], key)
-	if len(uid) < 4 {
-		// TODO(dgryski): create a distinct error here?
-		return ErrAuthFailed
-	}
-	copy(buf[8:], uid[:4])
+	// Use the last 4 UID bytes, NXP AN10927 section 3.2.5.
+	copy(buf[8:], uid[len(uid)-4:])
 
 	if _, _, err := d.communicateWithPICC(pcdMFAuthent, buf, 0, 0); err != nil {
 		return ErrAuthFailed
