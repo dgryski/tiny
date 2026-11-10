@@ -347,30 +347,79 @@ func (d *Device) selectCard() ([]byte, error) {
 	return nil, ErrRead
 }
 
+// anticollision returns the 4 UID bytes and the BCC of one cascade level. If
+// several cards answer, it keeps the one with a 1 at the first differing bit.
 func (d *Device) anticollision(cascadeLevel byte) ([]byte, error) {
 	if err := d.clearFlags(regColl, 0x80); err != nil {
 		return nil, err
 	}
 
-	backData, _, err := d.communicateWithPICC(pcdTransceive, []byte{cascadeLevel, 0x20}, 0, 0)
-	if err != nil {
-		return nil, err
+	// SEL, NVB, 4 UID bytes and the BCC.
+	var buf [7]byte
+	buf[0] = cascadeLevel
+	known := 0 // number of known UID bits
+
+	// Every collision makes at least one more bit known.
+	for i := 0; i <= 32; i++ {
+		whole := known / 8
+		txLastBits := byte(known % 8)
+		sendLen := 2 + whole
+		if txLastBits != 0 {
+			sendLen++
+		}
+		buf[1] = byte(2+whole)<<4 | txLastBits
+
+		back, lastBits, err := d.communicateWithPICC(pcdTransceive, buf[:sendLen], txLastBits, txLastBits)
+		if err != nil && !errors.Is(err, ErrCollision) {
+			return nil, err
+		}
+		collision := err != nil
+
+		// The first byte holds the known bits followed by the received bits.
+		mask := byte(0xFF) << txLastBits
+		for j, v := range back {
+			idx := 2 + whole + j
+			if idx >= len(buf) {
+				break
+			}
+			if j == 0 {
+				v = buf[idx]&^mask | v&mask
+			}
+			buf[idx] = v
+		}
+
+		if !collision {
+			if len(back) != 5-whole || lastBits != 0 {
+				return nil, ErrRead
+			}
+			if buf[2]^buf[3]^buf[4]^buf[5] != buf[6] {
+				return nil, errors.New("bcc mismatch")
+			}
+			return append([]byte{}, buf[2:]...), nil
+		}
+
+		// CollPos is the first colliding bit and 0 means bit 32 (CollReg in
+		// the MFRC522 datasheet).
+		collReg, err := d.readRegister(regColl)
+		if err != nil {
+			return nil, err
+		}
+		if collReg&0x20 != 0 {
+			return nil, ErrCollision
+		}
+		pos := int(collReg & 0x1F)
+		if pos == 0 {
+			pos = 32
+		}
+		if pos <= known {
+			return nil, ErrCollision
+		}
+
+		known = pos
+		buf[2+(pos-1)/8] |= 1 << ((pos - 1) % 8)
 	}
 
-	if len(backData) != 5 {
-		return nil, errors.New("bad data length")
-	}
-
-	var bcc byte
-	for _, v := range backData[:4] {
-		bcc ^= v
-	}
-
-	if bcc != backData[4] {
-		return nil, errors.New("bcc mismatch")
-	}
-
-	return backData, nil
+	return nil, ErrCollision
 }
 
 // selectTag selects the card by UID and returns its SAK.
