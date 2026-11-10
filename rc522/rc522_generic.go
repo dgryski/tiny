@@ -6,10 +6,22 @@ type machineSPI interface {
 	Transfer(byte) (byte, error)
 }
 
-type machinePin struct{}
+// machinePin lets tests observe pin changes through onChange.
+type machinePin struct {
+	onChange func(high bool)
+}
 
-func (machinePin) High() {}
-func (machinePin) Low()  {}
+func (p machinePin) High() {
+	if p.onChange != nil {
+		p.onChange(true)
+	}
+}
+
+func (p machinePin) Low() {
+	if p.onChange != nil {
+		p.onChange(false)
+	}
+}
 
 type Device struct {
 	bus   machineSPI
