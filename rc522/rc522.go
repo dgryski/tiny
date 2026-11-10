@@ -10,6 +10,7 @@ var (
 	ErrAuthFailed  = errors.New("authentication failed")
 	ErrWrite       = errors.New("write failed")
 	ErrReadTimeout = errors.New("read failed: timeout")
+	ErrRead        = errors.New("read failed")
 )
 
 func (d *Device) Init() error {
@@ -216,8 +217,14 @@ func (d *Device) communicateWithPICC(cmd byte, data []byte, validBits byte, rxAl
 		return nil, -1, ErrReadTimeout
 	}
 
-	if errReg, err := d.readRegister(regError); err != nil || errReg&0x13 != 0 {
+	errReg, err := d.readRegister(regError)
+	if err != nil {
 		return nil, -1, err
+	}
+
+	if errReg&0x13 != 0 {
+		// BufferOvfl ParityErr ProtocolErr
+		return nil, -1, ErrRead
 	}
 
 	if n&irqEn&0x01 == 1 {
