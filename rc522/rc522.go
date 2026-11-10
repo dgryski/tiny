@@ -64,33 +64,36 @@ func (d *Device) Init() error {
 func (d *Device) readRegister(reg byte) (byte, error) {
 	address := ((reg << 1) & 0x7E) | 0x80
 	d.cs.Low()
-	d.bus.Transfer(address)
-	val, err := d.bus.Transfer(0)
-	d.cs.High()
-	return val, err
+	defer d.cs.High()
+	if _, err := d.bus.Transfer(address); err != nil {
+		return 0, err
+	}
+	return d.bus.Transfer(0)
 }
 
 func (d *Device) writeRegister(reg, val byte) error {
 	address := (reg << 1) & 0x7E
 	d.cs.Low()
-	d.bus.Transfer(address)
+	defer d.cs.High()
+	if _, err := d.bus.Transfer(address); err != nil {
+		return err
+	}
 	_, err := d.bus.Transfer(val)
-	d.cs.High()
 	return err
 }
 
 func (d *Device) writeRegisterData(reg byte, vals []byte) error {
 	address := (reg << 1) & 0x7E
 	d.cs.Low()
-	d.bus.Transfer(address)
+	defer d.cs.High()
+	if _, err := d.bus.Transfer(address); err != nil {
+		return err
+	}
 	for _, val := range vals {
-		_, err := d.bus.Transfer(val)
-		if err != nil {
-			d.cs.High()
+		if _, err := d.bus.Transfer(val); err != nil {
 			return err
 		}
 	}
-	d.cs.High()
 	return nil
 }
 
@@ -106,9 +109,7 @@ func (d *Device) AntennaOn() error {
 		return err
 	}
 	if (curr & 0x03) != 0x03 {
-		if err := d.writeRegister(regTxControl, curr|0x03); err != nil {
-			return err
-		}
+		return d.writeRegister(regTxControl, curr|0x03)
 	}
 	return nil
 }
@@ -140,10 +141,12 @@ func (d *Device) SetAntennaGain(gain byte) error {
 	return nil
 }
 
+// Request reports whether a card answered REQA. No answer is not an error.
 func (d *Device) Request() (bool, error) {
 	return d.request_or_wakeup(piccREQA)
 }
 
+// Wakeup reports whether a card answered WUPA. No answer is not an error.
 func (d *Device) Wakeup() (bool, error) {
 	return d.request_or_wakeup(piccWUPA)
 }
@@ -164,6 +167,9 @@ func (d *Device) request_or_wakeup(mode byte) (bool, error) {
 
 	// REQA and WUPA are short frames of 7 bits.
 	back, lastBits, err := d.communicateWithPICC(pcdTransceive, []byte{mode}, 7, 0)
+	if errors.Is(err, ErrReadTimeout) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -344,13 +350,13 @@ func (d *Device) anticollision(cascadeLevel byte) ([]byte, error) {
 		return nil, errors.New("bad data length")
 	}
 
-	var crc byte
+	var bcc byte
 	for _, v := range backData[:4] {
-		crc = crc ^ v
+		bcc ^= v
 	}
 
-	if crc != backData[4] {
-		return nil, errors.New("crc mismatch")
+	if bcc != backData[4] {
+		return nil, errors.New("bcc mismatch")
 	}
 
 	return backData, nil
