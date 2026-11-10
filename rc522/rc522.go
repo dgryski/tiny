@@ -301,38 +301,32 @@ func (d *Device) ReadUID() (uid []byte, err error) {
 	return uuid, err
 }
 
-// selectCard selects the card after the IRQ event was received.
+// selectCard selects the card and returns its UID.
 func (d *Device) selectCard() ([]byte, error) {
-	uuid, err := d.anticollision(piccSEL_CL1)
-
-	if err != nil {
-		return nil, err
-	}
-	if _, err := d.selectTag(uuid, piccSEL_CL1); err != nil {
-		return nil, err
-	}
-
-	if uuid[0] == 0x88 { // Incomplete UID
-		// Get remaining bytes
-		uuidEnd, err := d.anticollision(piccSEL_CL2)
+	var uid []byte
+	for _, cl := range []byte{piccSEL_CL1, piccSEL_CL2, piccSEL_CL3} {
+		frame, err := d.anticollision(cl)
 		if err != nil {
 			return nil, err
 		}
 
-		// TODO(dgryski): check for uuidEnd[0] == 0x88 needing PICC_CMD_SEL_CL3
-
-		// strip off 0x88 and final crc byte
-		uuid = uuid[1 : len(uuid)-1]
-		uuid = append(uuid, uuidEnd[:len(uuidEnd)-1]...)
-
-		if _, err := d.selectTag(uuid, piccSEL_CL2); err != nil {
+		sak, err := d.selectTag(frame, cl)
+		if err != nil {
 			return nil, err
 		}
 
-		return uuid, nil
+		// SAK bit 3 means the UID is not complete (ISO/IEC 14443-3).
+		if sak&0x04 == 0 {
+			return append(uid, frame[:4]...), nil
+		}
+
+		if frame[0] != piccCT {
+			return nil, ErrRead
+		}
+		uid = append(uid, frame[1:4]...)
 	}
 
-	return uuid[:len(uuid)-1], nil
+	return nil, ErrRead
 }
 
 func (d *Device) anticollision(cascadeLevel byte) ([]byte, error) {
