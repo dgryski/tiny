@@ -11,24 +11,49 @@ var (
 	ErrWrite       = errors.New("write failed")
 	ErrReadTimeout = errors.New("read failed: timeout")
 	ErrRead        = errors.New("read failed")
+	ErrNoDevice    = errors.New("no response from device")
 )
 
 func (d *Device) Init() error {
-	// set intput/output modes
 	d.initPins()
 
-	// init triggers hard reset; wait for it to complete
+	// Pulling reset low then high triggers a hard reset.
+	d.reset.Low()
+	time.Sleep(time.Millisecond)
+	d.reset.High()
+	// Oscillator start-up time, MFRC522 datasheet section 8.8.2.
 	time.Sleep(50 * time.Millisecond)
 
-	d.writeRegister(regCommand, pcdSoftReset)
-	for i := range initSequence {
-		d.writeRegister(initSequence[i].reg, initSequence[i].val)
+	if err := d.writeRegister(regCommand, pcdSoftReset); err != nil {
+		return err
+	}
+	// Wait for the PowerDown bit to clear.
+	for i := 0; i < 3; i++ {
+		time.Sleep(50 * time.Millisecond)
+		cmd, err := d.readRegister(regCommand)
+		if err != nil {
+			return err
+		}
+		if cmd&(1<<4) == 0 {
+			break
+		}
 	}
 
-	// set antenna gain?
-	d.AntennaOn()
+	version, err := d.GetVersion()
+	if err != nil {
+		return err
+	}
+	if version == 0x00 || version == 0xFF {
+		return ErrNoDevice
+	}
 
-	return nil
+	for i := range initSequence {
+		if err := d.writeRegister(initSequence[i].reg, initSequence[i].val); err != nil {
+			return err
+		}
+	}
+
+	return d.AntennaOn()
 }
 
 // TODO(dgryski): read many
