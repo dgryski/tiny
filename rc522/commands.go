@@ -38,6 +38,8 @@ const (
 	// The commands used for MIFARE Ultralight (from http://www.nxp.com/documents/data_sheet/MF0ICU1.pdf Section 8.6)
 	// The piccMF_READ and PICC_CMD_MF_WRITE can also be used for MIFARE Ultralight.
 	piccUL_WRITE = 0xA2 // Writes one 4 byte page to the PICC.
+
+	mfACK = 0xA // 4 bit acknowledge from a MIFARE Classic PICC.
 )
 
 const (

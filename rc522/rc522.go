@@ -514,24 +514,34 @@ func (d *Device) ReadBlock(block byte) ([]byte, error) {
 	return backData[:16], nil
 }
 
-/*
-func (d *Device) WriteBlock(block byte, data [16]byte) error {
-	// Step 1: Command
-	d.writeRegister(FIFODataReg, PICC_WRITE)
-	d.writeRegister(FIFODataReg, block)
-	d.writeRegister(CommandReg, Transceive)
-	d.writeRegister(BitFramingReg, 0x80)
-	time.Sleep(10 * time.Millisecond)
-
-	// Step 2: Data
-	for _, b := range data {
-		d.writeRegister(FIFODataReg, b)
+// WriteBlock writes 16 bytes to a block of an authenticated sector.
+func (d *Device) WriteBlock(block byte, data []byte) error {
+	if len(data) != 16 {
+		return ErrWrite
 	}
-	d.writeRegister(CommandReg, Transceive)
-	d.writeRegister(BitFramingReg, 0x80)
+	if err := d.transceiveACK([]byte{piccMF_WRITE, block}); err != nil {
+		return err
+	}
+	return d.transceiveACK(data)
+}
+
+// transceiveACK sends buf with a CRC_A and expects a 4 bit ACK.
+func (d *Device) transceiveACK(buf []byte) error {
+	lsb, msb, err := d.calculateCRC(buf)
+	if err != nil {
+		return err
+	}
+	frame := append(append([]byte{}, buf...), lsb, msb)
+
+	back, lastBits, err := d.communicateWithPICC(pcdTransceive, frame, 0, 0)
+	if err != nil {
+		return err
+	}
+	if len(back) != 1 || lastBits != 4 || back[0] != mfACK {
+		return ErrWrite
+	}
 	return nil
 }
-*/
 
 func (d *Device) HaltA() error {
 	buf := make([]byte, 4)
