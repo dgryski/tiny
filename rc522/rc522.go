@@ -314,6 +314,8 @@ func (d *Device) clearFlags(register byte, mask byte) error {
 	return d.writeRegister(register, current&^mask)
 }
 
+// ReadUID selects one card and returns its UID. If several cards are in range
+// the choice between them is arbitrary and the others stay unselected.
 func (d *Device) ReadUID() (uid []byte, err error) {
 	uuid, err := d.selectCard()
 	return uuid, err
