@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const fifoSize = 64
+
 var (
 	ErrNoTag       = errors.New("no tag in range")
 	ErrAuthFailed  = errors.New("authentication failed")
@@ -158,64 +160,58 @@ func (d *Device) request_or_wakeup(mode byte) (bool, error) {
 		return false, err
 	}
 
-	_, backBits, err := d.communicateWithPICC(pcdTransceive, []byte{mode}, 0, 0)
+	// REQA and WUPA are short frames of 7 bits.
+	back, lastBits, err := d.communicateWithPICC(pcdTransceive, []byte{mode}, 7, 0)
 	if err != nil {
 		return false, err
 	}
-	if backBits != 0x10 {
+	if len(back) != 2 || lastBits != 0 {
 		return false, errors.New("wrong number of bits read")
 	}
 	return true, nil
 }
 
-func (d *Device) communicateWithPICC(cmd byte, data []byte, validBits byte, rxAlign byte) ([]byte, int, error) {
-
-	var irqEn byte
+// communicateWithPICC runs cmd and returns the received bytes and the number
+// of valid bits in the last byte, where 0 means all 8 bits are valid.
+func (d *Device) communicateWithPICC(cmd byte, data []byte, txLastBits byte, rxAlign byte) ([]byte, byte, error) {
 	var irqWait byte
 
 	switch cmd {
 	case pcdMFAuthent:
-		irqEn = 0x12
 		irqWait = 0x10
 	case pcdTransceive:
-		irqEn = 0x77
 		irqWait = 0x30
 	}
 
 	// TODO(dgryski): set command list slice?
 
 	if err := d.writeRegister(regCommand, pcdIdle); err != nil {
-		return nil, -1, err
+		return nil, 0, err
 	}
 
 	if err := d.writeRegister(regComIrq, 0x7F); err != nil {
-		return nil, -1, err
+		return nil, 0, err
 	}
 
 	if err := d.writeRegister(regFIFOLevel, 0x80); err != nil {
-		return nil, -1, err
+		return nil, 0, err
 	}
 
 	if err := d.writeRegisterData(regFIFOData, data); err != nil {
-		return nil, -1, err
+		return nil, 0, err
 	}
 
-	var txLastBits byte
-	if data[0] == piccREQA || data[0] == piccWUPA {
-		txLastBits = 7
-	}
-
-	if err := d.writeRegister(regBitFraming, txLastBits); err != nil {
-		return nil, -1, err
+	if err := d.writeRegister(regBitFraming, rxAlign<<4|txLastBits); err != nil {
+		return nil, 0, err
 	}
 
 	if err := d.writeRegister(regCommand, cmd); err != nil {
-		return nil, -1, err
+		return nil, 0, err
 	}
 
 	if cmd == pcdTransceive {
 		if err := d.setFlags(regBitFraming, 0x80); err != nil {
-			return nil, -1, err
+			return nil, 0, err
 		}
 	}
 
@@ -226,74 +222,61 @@ func (d *Device) communicateWithPICC(cmd byte, data []byte, validBits byte, rxAl
 	for time.Now().Before(deadline) {
 		var err error
 		if n, err = d.readRegister(regComIrq); err != nil {
-			return nil, -1, err
+			return nil, 0, err
 		}
 		if (n & irqWait) != 0 {
 			completed = true
 			break
 		}
 		if n&0x01 != 0 {
-			return nil, -1, ErrReadTimeout
+			return nil, 0, ErrReadTimeout
 		}
 		time.Sleep(1 * time.Microsecond)
 	}
 
 	if !completed {
-		return nil, -1, ErrReadTimeout
+		return nil, 0, ErrReadTimeout
 	}
 
 	errReg, err := d.readRegister(regError)
 	if err != nil {
-		return nil, -1, err
+		return nil, 0, err
 	}
 
 	if errReg&0x13 != 0 {
 		// BufferOvfl ParityErr ProtocolErr
-		return nil, -1, ErrRead
-	}
-
-	if n&irqEn&0x01 == 1 {
-		return nil, -1, errors.New("irq error")
+		return nil, 0, ErrRead
 	}
 
 	var backData []byte
-	var backLength int
+	var lastBits byte
 
 	if cmd == pcdTransceive {
 		n, err := d.readRegister(regFIFOLevel)
 		if err != nil {
-			return nil, -1, err
+			return nil, 0, err
 		}
-		if n == 0 {
-			n = 1
-		}
-		if n > 16 {
-			n = 16
+		if n > fifoSize {
+			return nil, 0, ErrRead
 		}
 
 		backData = make([]byte, n)
 		for i := byte(0); i < n; i++ {
 			byteVal, err := d.readRegister(regFIFOData)
 			if err != nil {
-				return nil, -1, err
+				return nil, 0, err
 			}
 			backData[i] = byteVal
 		}
 
-		lastBits, err := d.readRegister(regControl)
+		control, err := d.readRegister(regControl)
 		if err != nil {
-			return nil, -1, err
+			return nil, 0, err
 		}
-		lastBits = lastBits & 0x07
-		if lastBits != 0 {
-			backLength = (int(n)-1)*8 + int(lastBits)
-		} else {
-			backLength = int(n) * 8
-		}
-
+		lastBits = control & 0x07
 	}
 
-	return backData, backLength, nil
+	return backData, lastBits, nil
 }
 
 func (d *Device) setFlags(register byte, mask byte) error {
@@ -356,10 +339,6 @@ func (d *Device) anticollision(cascadeLevel byte) ([]byte, error) {
 		return nil, err
 	}
 
-	if err := d.writeRegister(regBitFraming, 0x00); err != nil {
-		return nil, err
-	}
-
 	backData, _, err := d.communicateWithPICC(pcdTransceive, []byte{cascadeLevel, 0x20}, 0, 0)
 	if err != nil {
 		return nil, err
@@ -399,21 +378,13 @@ func (d *Device) selectTag(serial []byte, cl byte) (byte, error) {
 	buf[bptr] = msb
 	bptr++
 
-	// TODO(dgryski): this should be
-	// PCD_WriteRegister(BitFramingReg, (rxAlign << 4) + txLastBits);
-	// RxAlign = BitFramingReg[6..4]. TxLastBits = BitFramingReg[2..0]
-
-	if err := d.writeRegister(regBitFraming, 0x00); err != nil {
-		return 0, err
-	}
-
-	backData, backLen, err := d.communicateWithPICC(pcdTransceive, buf[:bptr], 0, 0)
+	backData, lastBits, err := d.communicateWithPICC(pcdTransceive, buf[:bptr], 0, 0)
 	if err != nil {
 		return 0, err
 	}
 
 	var blocks byte
-	if backLen == 0x18 {
+	if len(backData) == 3 && lastBits == 0 {
 		blocks = backData[0]
 	}
 	return blocks, nil
