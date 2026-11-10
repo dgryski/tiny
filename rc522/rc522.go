@@ -15,6 +15,7 @@ var (
 	ErrRead        = errors.New("read failed")
 	ErrNoDevice    = errors.New("no response from device")
 	ErrCRC         = errors.New("crc mismatch")
+	ErrNAK         = errors.New("card replied with NAK")
 )
 
 func (d *Device) Init() error {
@@ -489,12 +490,28 @@ func (d *Device) ReadBlock(block byte) ([]byte, error) {
 	buf[2] = lsb
 	buf[3] = msb
 
-	backData, _, err := d.communicateWithPICC(pcdTransceive, buf, 0, 0)
+	backData, lastBits, err := d.communicateWithPICC(pcdTransceive, buf, 0, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	return backData, nil
+	// A MIFARE Classic NAK is a single 4 bit frame.
+	if len(backData) == 1 && lastBits == 4 {
+		return nil, ErrNAK
+	}
+	// 16 data bytes followed by a CRC_A.
+	if len(backData) != 18 || lastBits != 0 {
+		return nil, ErrRead
+	}
+	lsb, msb, err = d.calculateCRC(backData[:16])
+	if err != nil {
+		return nil, err
+	}
+	if backData[16] != lsb || backData[17] != msb {
+		return nil, ErrCRC
+	}
+
+	return backData[:16], nil
 }
 
 /*
