@@ -546,14 +546,14 @@ func (d *Device) HaltA() error {
 	buf[3] = msb
 
 	_, _, err = d.communicateWithPICC(pcdTransceive, buf, 0, 0)
-	if err != nil {
-		if errors.Is(err, ErrReadTimeout) {
-			return nil
-		}
-		return err
+	if errors.Is(err, ErrReadTimeout) {
+		return nil
 	}
-
-	return nil
+	if err == nil {
+		// A card that answers HLTA has not halted.
+		return ErrRead
+	}
+	return err
 }
 
 func (d *Device) StopCrypto() {
